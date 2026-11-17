@@ -185,7 +185,7 @@ const {initializeApp}=await import(B+'firebase-app.js');
 const A=await import(B+'firebase-auth.js');
 const F=await import(B+'firebase-firestore.js');
 const app=initializeApp({apiKey:"AIzaSyAZZZdPtFcVBPhzezK5nlo2RjotkvTqN4I",authDomain:"ring-6b4f0.firebaseapp.com",projectId:"ring-6b4f0",storageBucket:"ring-6b4f0.firebasestorage.app",messagingSenderId:"963896854945",appId:"1:963896854945:web:4f90c7d463e0fade3aa3e0"});
-const auth=A.getAuth(app), db=F.getFirestore(app);
+const auth=A.getAuth(app), db=F.initializeFirestore(app,{experimentalAutoDetectLongPolling:true});
 const c={user:null,profile:null,friends:null}; let pending=null;
 const emit=()=>window.dispatchEvent(new Event('cloud-change'));
 const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -360,7 +360,7 @@ function saveSession(){
   return true;
 }
 const esc=x=>String(x).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const ERR={'auth/invalid-credential':'Email ou mot de passe incorrect','auth/invalid-email':'Email invalide','auth/email-already-in-use':'Cet email a déjà un compte','auth/weak-password':'Mot de passe trop court (6 caractères min.)','auth/network-request-failed':'Pas de connexion internet','auth/too-many-requests':"Trop d'essais, réessaie plus tard",'app/not-found':'Code introuvable','app/self':"C'est ton propre code",'app/already':'Vous êtes déjà amis','app/pending':'Demande déjà envoyée','app/incoming':"Cette personne t'a déjà envoyé une demande : accepte-la",'permission-denied':'Action refusée'};
+const ERR={'auth/invalid-credential':'Email ou mot de passe incorrect','auth/invalid-email':'Email invalide','auth/email-already-in-use':'Cet email a déjà un compte','auth/weak-password':'Mot de passe trop court (6 caractères min.)','auth/network-request-failed':'Pas de connexion internet','auth/too-many-requests':"Trop d'essais, réessaie plus tard",'app/not-found':'Code introuvable','app/self':"C'est ton propre code",'app/already':'Vous êtes déjà amis','app/pending':'Demande déjà envoyée','app/incoming':"Cette personne t'a déjà envoyé une demande : accepte-la",'permission-denied':'Action refusée','app/timeout':'Connexion trop lente, réessaie dans un instant'};
 const errMsg=e=>ERR[e&&e.code]||'Erreur : '+((e&&e.code)||e);
 const cl=()=>window.cloud, logged=()=>cl()&&cl().user;
 let histUid=null;
@@ -403,13 +403,13 @@ function setAuthMode(m){ authMode=m; $('nameField').style.display=m==='up'?'':'n
 function badge(f){ $('friendsBtn').textContent='Amis'+(f&&f.incoming.length?' ('+f.incoming.length+')':''); }
 async function renderFriends(){
   const c=cl(), b=$('fbody');
-  let f; try{ f=await c.loadFriends(); }catch(e){ b.innerHTML='<div class="empty">'+esc(errMsg(e))+'</div>'; return; }
+  let f; try{ f=await Promise.race([c.loadFriends(),new Promise((_,r)=>setTimeout(()=>r({code:'app/timeout'}),12000))]); }catch(e){ b.innerHTML='<div class="empty">'+esc(errMsg(e))+'</div>'; return; }
   const sec=(t,a,btn)=>a.length?'<h3>'+t+'</h3>'+a.map(x=>'<div class="hitem"><b>'+esc(x.name)+'</b><span>'+btn(x)+'</span></div>').join(''):'';
   const keep=document.getElementById('f-code')?$('f-code').value:'';
   b.innerHTML='<div class="card"><small>Connecté : '+esc(c.profile?c.profile.name:'')+'</small><div class="code">'+esc(c.profile?c.profile.code:'')+'</div><small>Ton code ami : donne-le pour qu\'on t\'ajoute</small></div>'
    +'<div class="card"><input id="f-code" placeholder="Code ami de l\'autre personne" maxlength="6" autocapitalize="characters" autocomplete="off"><button class="pill danger" id="f-add">Envoyer la demande</button><div class="err" id="f-msg"></div></div>'
    +sec('Demandes reçues',f.incoming,x=>'<button class="mini ok" data-a="acc" data-id="'+x.id+'">Accepter</button><button class="mini" data-a="del" data-id="'+x.id+'">Refuser</button>')
-   +sec('Mes amis',f.accepted,x=>'<button class="mini ok" data-a="see" data-u="'+x.uid+'">Voir</button><button class="mini" data-a="del" data-id="'+x.id+'">Retirer</button>')
+   +(f.accepted.length?sec('Mes amis',f.accepted,x=>'<button class="mini ok" data-a="see" data-u="'+x.uid+'">Voir</button><button class="mini" data-a="del" data-id="'+x.id+'">Retirer</button>'):'<h3>Mes amis</h3><div class="empty" style="margin:10px 0">Pas encore d\'amis pour partager tes stats :(</div>')
    +sec('Demandes envoyées',f.outgoing,x=>'<button class="mini" data-a="del" data-id="'+x.id+'">Annuler</button>');
   $('f-code').value=keep; badge(f);
 }
