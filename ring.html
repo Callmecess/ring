@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Ring</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-title" content="Ring">
+<style>
+:root{--bg:#0b0b0d;--work:#ff3b30;--rest:#30d158;--fg:#fff;--muted:#8e8e93;--card:#1c1c1e;--accent:var(--work);
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"SF Pro Display",system-ui,sans-serif}
+body.rest{--accent:var(--rest)}
+.view{height:100%;display:none;flex-direction:column;align-items:center;justify-content:space-between;padding:6vh 24px 8vh}
+.view.on{display:flex}
+
+/* Réglages */
+h1{margin:0;font-size:26px;font-weight:700;letter-spacing:.05em}
+.rows{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
+.row{background:var(--card);border-radius:18px;padding:16px 18px;display:flex;align-items:center;justify-content:space-between}
+.lbl{font-size:17px}
+.stepper{display:flex;align-items:center;gap:14px}
+.stepper b{min-width:70px;text-align:center;font-size:26px;font-weight:600;font-variant-numeric:tabular-nums}
+.stepper button{width:46px;height:46px;font-size:26px;background:#2c2c2e}
+.total{color:var(--muted);font-size:16px;text-align:center}
+
+/* Chrono */
+.phase{font-size:22px;font-weight:700;letter-spacing:.2em;color:var(--accent);text-align:center}
+.round{font-size:18px;color:var(--muted);margin-top:8px;text-align:center}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:16px;flex-wrap:wrap;max-width:300px}
+.dot{width:10px;height:10px;border-radius:50%;background:#333}
+.dot.done{background:var(--work)}
+.dot.cur{background:var(--fg)}
+.time{font-size:min(30vw,130px);font-weight:200;font-variant-numeric:tabular-nums;letter-spacing:-.02em;line-height:1}
+.time.warn{color:var(--accent)}
+.bottom{display:flex;flex-direction:column;align-items:center;gap:18px;min-height:150px;justify-content:flex-end}
+.link{background:none;border:0;color:var(--muted);font-size:17px;width:auto;height:auto;padding:8px 14px;border-radius:10px;visibility:hidden}
+.link.show{visibility:visible}
+
+button{width:96px;height:96px;border-radius:50%;border:0;background:var(--accent);color:#fff;font-size:38px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-family:inherit}
+button:active{transform:scale(.94)}
+button.start{width:100%;max-width:420px;height:64px;border-radius:18px;font-size:20px;font-weight:700;letter-spacing:.05em}
+
+.tlink{background:none;border:0;color:var(--muted);font-size:17px;width:auto;height:auto;padding:8px 14px;border-radius:10px}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;padding:24px;z-index:10}
+.modal.on{display:flex}
+.box{background:var(--card);border-radius:22px;padding:26px 22px;width:100%;max-width:360px;text-align:center}
+.box h2{margin:0 0 8px;font-size:22px}
+.box p{margin:0 0 22px;color:var(--muted);font-size:16px}
+.btns{display:flex;flex-direction:column;gap:10px;width:100%}
+button.pill{width:100%;height:54px;border-radius:14px;font-size:18px;font-weight:600;background:#2c2c2e}
+button.pill.danger{background:var(--work)}
+#hist{justify-content:flex-start;gap:14px;overflow-y:auto}
+.hlist{width:100%;max-width:420px;display:flex;flex-direction:column;gap:10px;flex:1}
+.hitem{background:var(--card);border-radius:14px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.hitem small{color:var(--muted);display:block;font-size:14px;margin-top:2px}
+.hitem b{font-size:17px}
+.empty{color:var(--muted);text-align:center;margin-top:30px}
+.toast{position:fixed;left:50%;top:calc(env(safe-area-inset-top,0px) + 16px);transform:translate(-50%,-30px);background:var(--rest);color:#000;font-weight:600;padding:12px 20px;border-radius:14px;opacity:0;transition:.3s;z-index:20;pointer-events:none}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+
+<div class="view on" id="setup">
+  <h1>🥊 SPARRING</h1>
+  <div class="rows">
+    <div class="row"><span class="lbl">Rounds</span>
+      <div class="stepper"><button data-k="rounds" data-d="-1">−</button><b id="v-rounds"></b><button data-k="rounds" data-d="1">+</button></div></div>
+    <div class="row"><span class="lbl">Sparring</span>
+      <div class="stepper"><button data-k="work" data-d="-15">−</button><b id="v-work"></b><button data-k="work" data-d="15">+</button></div></div>
+    <div class="row"><span class="lbl">Repos</span>
+      <div class="stepper"><button data-k="rest" data-d="-5">−</button><b id="v-rest"></b><button data-k="rest" data-d="5">+</button></div></div>
+  </div>
+  <div class="total" id="total"></div>
+  <div style="width:100%;max-width:420px;display:flex;flex-direction:column;align-items:center;gap:8px">
+    <button class="start" id="start">DÉMARRER</button>
+    <button class="tlink" id="histBtn">Historique</button>
+  </div>
+</div>
+
+<div class="view" id="run">
+  <div>
+    <div class="phase" id="phase">COMBAT</div>
+    <div class="round" id="round"></div>
+    <div class="dots" id="dots"></div>
+  </div>
+  <div class="time" id="time">2:00</div>
+  <div class="bottom">
+    <button id="btn" aria-label="Lecture / Pause">▶</button>
+    <button class="link" id="back">Corner</button>
+  </div>
+</div>
+
+<div class="view" id="hist">
+  <h1>HISTORIQUE</h1>
+  <div class="total" id="hsum"></div>
+  <div class="hlist" id="hlist"></div>
+  <div class="btns" style="max-width:420px;align-items:center">
+    <button class="pill" id="hback">Retour</button>
+    <button class="tlink" id="hclear">Effacer l'historique</button>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="box">
+    <h2>Arrêter l'entraînement ?</h2>
+    <p>Si oui, la séance est enregistrée avec la date, le temps de combat et les rounds faits.</p>
+    <div class="btns">
+      <button class="pill danger" id="yes">Oui, terminer</button>
+      <button class="pill" id="no">Non, rester en pause</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* Icône écran d'accueil : gant de boxe 🥊 */
+(function(){try{
+  const c=document.createElement('canvas'); c.width=c.height=180;
+  const x=c.getContext('2d');
+  x.fillStyle='#0b0b0d'; x.fillRect(0,0,180,180);
+  x.font='110px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+  x.textAlign='center'; x.textBaseline='middle';
+  x.fillText('\u{1F94A}',90,98);
+  const url=c.toDataURL('image/png');
+  ['apple-touch-icon','icon'].forEach(rel=>{
+    const l=document.createElement('link'); l.rel=rel; l.href=url; document.head.appendChild(l);
+  });
+}catch(e){}})();
+</script>
+
+<script>
+/* Anti-zoom : pas de zoom au double-tap ni au pincement */
+['gesturestart','gesturechange','gestureend','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('touchmove',e=>{ if(e.touches.length>1) e.preventDefault(); },{passive:false});
+</script>
+
+<script>
+const LIM={rounds:[1,30],work:[15,600],rest:[0,300]};
+let cfg={rounds:7,work:120,rest:60};
+try{const s=JSON.parse(localStorage.getItem('chronoCfg')||'null'); if(s&&s.rounds&&s.work&&s.rest!==undefined) cfg=s;}catch(e){}
+
+let round=1, phase='work', remaining=0, running=false, last=0, lastBeep=null, finished=false, fightMs=0, doneRounds=0, saved=false, ctx=null, wake=null, timer=null;
+const $=id=>document.getElementById(id);
+const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
+
+/* ---------- Réglages ---------- */
+function renderSetup(){
+  $('v-rounds').textContent=cfg.rounds;
+  $('v-work').textContent=fmt(cfg.work);
+  $('v-rest').textContent=fmt(cfg.rest);
+  const tot=cfg.rounds*cfg.work+(cfg.rounds-1)*cfg.rest;
+  const m=Math.round(tot/60);
+  $('total').textContent='Durée totale : '+(tot>=3600?Math.floor(tot/3600)+' h '+String(Math.round((tot%3600)/60)).padStart(2,'0'):m+' min');
+}
+document.querySelectorAll('.stepper button').forEach(b=>b.addEventListener('click',()=>{
+  const k=b.dataset.k, d=+b.dataset.d;
+  cfg[k]=Math.min(LIM[k][1],Math.max(LIM[k][0],cfg[k]+d));
+  try{localStorage.setItem('chronoCfg',JSON.stringify(cfg));}catch(e){}
+  renderSetup();
+}));
+
+/* ---------- Audio ---------- */
+function initAudio(){
+  try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
+  if(!ctx){ try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+  if(ctx && ctx.state==='suspended') ctx.resume();
+}
+function beep(freq,dur){
+  if(!ctx) return;
+  const o=ctx.createOscillator(), g=ctx.createGain(), t=ctx.currentTime;
+  o.type='sine'; o.frequency.value=freq;
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.exponentialRampToValueAtTime(1,t+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(t); o.stop(t+dur+0.02);
+}
+async function lock(){ try{ if('wakeLock' in navigator) wake=await navigator.wakeLock.request('screen'); }catch(e){} }
+function unlock(){ try{ wake&&wake.release(); }catch(e){} wake=null; }
+document.addEventListener('visibilitychange',()=>{ if(running && document.visibilityState==='visible') lock(); });
+
+/* ---------- Chrono ---------- */
+function buildDots(){
+  const d=$('dots'); d.innerHTML='';
+  for(let i=0;i<cfg.rounds;i++){const e=document.createElement('div');e.className='dot';d.appendChild(e);}
+}
+function render(){
+  document.body.classList.toggle('rest',phase==='rest' && !finished);
+  const s=Math.max(0,Math.ceil(remaining/1000));
+  $('time').textContent=fmt(s);
+  $('time').classList.toggle('warn',running && s<=5 && s>0 && !finished);
+  $('phase').textContent=finished?'TERMINÉ':(phase==='work'?'COMBAT':'PAUSE');
+  $('round').textContent=finished?cfg.rounds+' round'+(cfg.rounds>1?'s':'')+' fait'+(cfg.rounds>1?'s':''):'Round '+round+' / '+cfg.rounds;
+  [...$('dots').children].forEach((d,i)=>{
+    d.className='dot'+((i<round-1||finished)?' done':(i===round-1?' cur':''));
+  });
+  $('btn').textContent=running?'❚❚':'▶';
+  $('back').classList.toggle('show',finished);
+}
+function advance(){
+  const over=remaining;
+  if(phase==='work'){ doneRounds++;
+    if(round===cfg.rounds){ finished=true; running=false; remaining=0; unlock(); clearInterval(timer); beep(660,0.9); saveSession(); return; }
+    if(cfg.rest>0){ phase='rest'; remaining=cfg.rest*1000+over; beep(660,0.6); }
+    else { round++; remaining=cfg.work*1000+over; beep(1320,0.6); }
+  } else {
+    round++; phase='work'; remaining=cfg.work*1000+over; beep(1320,0.6);
+  }
+  lastBeep=null;
+}
+function tick(){
+  if(!running) return;
+  const now=performance.now();
+  const el=now-last;
+  remaining-=el; last=now;
+  if(phase==='work') fightMs+=Math.max(0,el+Math.min(0,remaining));
+  const s=Math.ceil(remaining/1000);
+  if(remaining>0 && s<=5 && s>=1 && s!==lastBeep){ lastBeep=s; beep(880,0.15); }
+  if(remaining<=0) advance();
+  render();
+}
+function reset(){ fightMs=0; doneRounds=0; saved=false; round=1; phase='work'; remaining=cfg.work*1000; lastBeep=null; finished=false; }
+function play(){
+  initAudio();
+  if(finished) reset();
+  running=true; last=performance.now();
+  clearInterval(timer); timer=setInterval(tick,100);
+  lock(); render();
+}
+function pause(){ running=false; clearInterval(timer); unlock(); render(); }
+
+$('start').addEventListener('click',()=>{
+  reset(); buildDots();
+  $('setup').classList.remove('on'); $('run').classList.add('on');
+  play();
+});
+function show(id){ document.querySelectorAll('.view').forEach(v=>v.classList.remove('on')); $(id).classList.add('on'); }
+function goSetup(){ pause(); finished=false; document.body.classList.remove('rest'); show('setup'); }
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); setTimeout(()=>t.classList.remove('on'),2500); }
+
+/* ---------- Historique ---------- */
+function loadHist(){ try{ const h=JSON.parse(localStorage.getItem('ringHist')||'[]'); return Array.isArray(h)?h:[]; }catch(e){ return []; } }
+function fmtLong(s){ return s>=3600 ? Math.floor(s/3600)+' h '+String(Math.floor((s%3600)/60)).padStart(2,'0') : fmt(s); }
+function saveSession(){
+  if(saved || fightMs<1000) return false;
+  saved=true;
+  const h=loadHist();
+  h.unshift({t:new Date().toISOString(),rounds:doneRounds,planned:cfg.rounds,fightSec:Math.round(fightMs/1000)});
+  try{ localStorage.setItem('ringHist',JSON.stringify(h)); }catch(e){}
+  toast('✓ Séance enregistrée');
+  return true;
+}
+function renderHist(){
+  const h=loadHist(), l=$('hlist'); l.innerHTML='';
+  if(!h.length){ $('hsum').textContent=''; l.innerHTML='<div class="empty">Aucune séance enregistrée</div>'; return; }
+  const tot=h.reduce((a,x)=>a+x.fightSec,0);
+  $('hsum').textContent=h.length+' séance'+(h.length>1?'s':'')+' · '+fmtLong(tot)+' de combat';
+  h.forEach(x=>{
+    const d=new Date(x.t), el=document.createElement('div'); el.className='hitem';
+    el.innerHTML='<div><b>'+d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+'</b><small>'+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+'</small></div>'
+      +'<div style="text-align:right"><b>'+x.rounds+' / '+x.planned+' rounds</b><small>'+fmt(x.fightSec)+' de combat</small></div>';
+    l.appendChild(el);
+  });
+}
+
+$('btn').addEventListener('click',()=>{
+  if(running){ pause(); $('modal').classList.add('on'); } else play();
+});
+$('no').addEventListener('click',()=>$('modal').classList.remove('on'));
+$('yes').addEventListener('click',()=>{ $('modal').classList.remove('on'); saveSession(); goSetup(); });
+$('back').addEventListener('click',goSetup);
+$('histBtn').addEventListener('click',()=>{ renderHist(); show('hist'); });
+$('hback').addEventListener('click',()=>show('setup'));
+$('hclear').addEventListener('click',()=>{ if(confirm("Effacer tout l'historique ?")){ try{ localStorage.removeItem('ringHist'); }catch(e){} renderHist(); } });
+renderSetup();
+</script>
+</body>
+</html>
