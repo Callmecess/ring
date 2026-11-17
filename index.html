@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>Ring</title>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="color-scheme" content="dark">
@@ -11,7 +11,8 @@
 <style>
 :root{--bg:#0b0b0d;--work:#ff3b30;--rest:#30d158;--fg:#fff;--muted:#8e8e93;--card:#1c1c1e;--accent:var(--work);
 box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;touch-action:manipulation}
+html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%}
 html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,"SF Pro Display",system-ui,sans-serif}
 body.rest{--accent:var(--rest)}
 .view{height:100%;display:none;flex-direction:column;align-items:center;justify-content:space-between;padding:6vh 24px 8vh}
@@ -134,144 +135,16 @@ button.pill.danger{background:var(--work)}
 </script>
 
 <script>
+/* Anti-zoom : pas de zoom au double-tap ni au pincement */
+['gesturestart','gesturechange','gestureend','dblclick'].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault()));
+document.addEventListener('touchmove',e=>{ if(e.touches.length>1) e.preventDefault(); },{passive:false});
+</script>
+
+<script>
 const LIM={rounds:[1,30],work:[15,600],rest:[0,300]};
 let cfg={rounds:7,work:120,rest:60};
 try{const s=JSON.parse(localStorage.getItem('chronoCfg')||'null'); if(s&&s.rounds&&s.work&&s.rest!==undefined) cfg=s;}catch(e){}
 
 let round=1, phase='work', remaining=0, running=false, last=0, lastBeep=null, finished=false, fightMs=0, doneRounds=0, saved=false, ctx=null, wake=null, timer=null;
 const $=id=>document.getElementById(id);
-const fmt=s=>Math.floor(s/60)+':'+String(s%60).padStart(2,'0');
-
-/* ---------- Réglages ---------- */
-function renderSetup(){
-  $('v-rounds').textContent=cfg.rounds;
-  $('v-work').textContent=fmt(cfg.work);
-  $('v-rest').textContent=fmt(cfg.rest);
-  const tot=cfg.rounds*cfg.work+(cfg.rounds-1)*cfg.rest;
-  const m=Math.round(tot/60);
-  $('total').textContent='Durée totale : '+(tot>=3600?Math.floor(tot/3600)+' h '+String(Math.round((tot%3600)/60)).padStart(2,'0'):m+' min');
-}
-document.querySelectorAll('.stepper button').forEach(b=>b.addEventListener('click',()=>{
-  const k=b.dataset.k, d=+b.dataset.d;
-  cfg[k]=Math.min(LIM[k][1],Math.max(LIM[k][0],cfg[k]+d));
-  try{localStorage.setItem('chronoCfg',JSON.stringify(cfg));}catch(e){}
-  renderSetup();
-}));
-
-/* ---------- Audio ---------- */
-function initAudio(){
-  try{ if(navigator.audioSession) navigator.audioSession.type='playback'; }catch(e){}
-  if(!ctx){ try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
-  if(ctx && ctx.state==='suspended') ctx.resume();
-}
-function beep(freq,dur){
-  if(!ctx) return;
-  const o=ctx.createOscillator(), g=ctx.createGain(), t=ctx.currentTime;
-  o.type='sine'; o.frequency.value=freq;
-  g.gain.setValueAtTime(0.0001,t);
-  g.gain.exponentialRampToValueAtTime(1,t+0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
-  o.connect(g); g.connect(ctx.destination);
-  o.start(t); o.stop(t+dur+0.02);
-}
-async function lock(){ try{ if('wakeLock' in navigator) wake=await navigator.wakeLock.request('screen'); }catch(e){} }
-function unlock(){ try{ wake&&wake.release(); }catch(e){} wake=null; }
-document.addEventListener('visibilitychange',()=>{ if(running && document.visibilityState==='visible') lock(); });
-
-/* ---------- Chrono ---------- */
-function buildDots(){
-  const d=$('dots'); d.innerHTML='';
-  for(let i=0;i<cfg.rounds;i++){const e=document.createElement('div');e.className='dot';d.appendChild(e);}
-}
-function render(){
-  document.body.classList.toggle('rest',phase==='rest' && !finished);
-  const s=Math.max(0,Math.ceil(remaining/1000));
-  $('time').textContent=fmt(s);
-  $('time').classList.toggle('warn',running && s<=5 && s>0 && !finished);
-  $('phase').textContent=finished?'TERMINÉ':(phase==='work'?'COMBAT':'PAUSE');
-  $('round').textContent=finished?cfg.rounds+' round'+(cfg.rounds>1?'s':'')+' fait'+(cfg.rounds>1?'s':''):'Round '+round+' / '+cfg.rounds;
-  [...$('dots').children].forEach((d,i)=>{
-    d.className='dot'+((i<round-1||finished)?' done':(i===round-1?' cur':''));
-  });
-  $('btn').textContent=running?'❚❚':'▶';
-  $('back').classList.toggle('show',finished);
-}
-function advance(){
-  const over=remaining;
-  if(phase==='work'){ doneRounds++;
-    if(round===cfg.rounds){ finished=true; running=false; remaining=0; unlock(); clearInterval(timer); beep(660,0.9); saveSession(); return; }
-    if(cfg.rest>0){ phase='rest'; remaining=cfg.rest*1000+over; beep(660,0.6); }
-    else { round++; remaining=cfg.work*1000+over; beep(1320,0.6); }
-  } else {
-    round++; phase='work'; remaining=cfg.work*1000+over; beep(1320,0.6);
-  }
-  lastBeep=null;
-}
-function tick(){
-  if(!running) return;
-  const now=performance.now();
-  const el=now-last;
-  remaining-=el; last=now;
-  if(phase==='work') fightMs+=Math.max(0,el+Math.min(0,remaining));
-  const s=Math.ceil(remaining/1000);
-  if(remaining>0 && s<=5 && s>=1 && s!==lastBeep){ lastBeep=s; beep(880,0.15); }
-  if(remaining<=0) advance();
-  render();
-}
-function reset(){ fightMs=0; doneRounds=0; saved=false; round=1; phase='work'; remaining=cfg.work*1000; lastBeep=null; finished=false; }
-function play(){
-  initAudio();
-  if(finished) reset();
-  running=true; last=performance.now();
-  clearInterval(timer); timer=setInterval(tick,100);
-  lock(); render();
-}
-function pause(){ running=false; clearInterval(timer); unlock(); render(); }
-
-$('start').addEventListener('click',()=>{
-  reset(); buildDots();
-  $('setup').classList.remove('on'); $('run').classList.add('on');
-  play();
-});
-function show(id){ document.querySelectorAll('.view').forEach(v=>v.classList.remove('on')); $(id).classList.add('on'); }
-function goSetup(){ pause(); finished=false; document.body.classList.remove('rest'); show('setup'); }
-function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('on'); setTimeout(()=>t.classList.remove('on'),2500); }
-
-/* ---------- Historique ---------- */
-function loadHist(){ try{ const h=JSON.parse(localStorage.getItem('ringHist')||'[]'); return Array.isArray(h)?h:[]; }catch(e){ return []; } }
-function fmtLong(s){ return s>=3600 ? Math.floor(s/3600)+' h '+String(Math.floor((s%3600)/60)).padStart(2,'0') : fmt(s); }
-function saveSession(){
-  if(saved || fightMs<1000) return false;
-  saved=true;
-  const h=loadHist();
-  h.unshift({t:new Date().toISOString(),rounds:doneRounds,planned:cfg.rounds,fightSec:Math.round(fightMs/1000)});
-  try{ localStorage.setItem('ringHist',JSON.stringify(h)); }catch(e){}
-  toast('✓ Séance enregistrée');
-  return true;
-}
-function renderHist(){
-  const h=loadHist(), l=$('hlist'); l.innerHTML='';
-  if(!h.length){ $('hsum').textContent=''; l.innerHTML='<div class="empty">Aucune séance enregistrée</div>'; return; }
-  const tot=h.reduce((a,x)=>a+x.fightSec,0);
-  $('hsum').textContent=h.length+' séance'+(h.length>1?'s':'')+' · '+fmtLong(tot)+' de combat';
-  h.forEach(x=>{
-    const d=new Date(x.t), el=document.createElement('div'); el.className='hitem';
-    el.innerHTML='<div><b>'+d.toLocaleDateString('fr-FR',{weekday:'short',day:'numeric',month:'short',year:'numeric'})+'</b><small>'+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})+'</small></div>'
-      +'<div style="text-align:right"><b>'+x.rounds+' / '+x.planned+' rounds</b><small>'+fmt(x.fightSec)+' de combat</small></div>';
-    l.appendChild(el);
-  });
-}
-
-$('btn').addEventListener('click',()=>{
-  if(running){ pause(); $('modal').classList.add('on'); } else play();
-});
-$('no').addEventListener('click',()=>$('modal').classList.remove('on'));
-$('yes').addEventListener('click',()=>{ $('modal').classList.remove('on'); saveSession(); goSetup(); });
-$('back').addEventListener('click',goSetup);
-$('histBtn').addEventListener('click',()=>{ renderHist(); show('hist'); });
-$('hback').addEventListener('click',()=>show('setup'));
-$('hclear').addEventListener('click',()=>{ if(confirm("Effacer tout l'historique ?")){ try{ localStorage.removeItem('ringHist'); }catch(e){} renderHist(); } });
-renderSetup();
-</script>
-</body>
-</html>
+const
