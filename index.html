@@ -124,6 +124,7 @@ button.chip.sel{background:var(--work)}
   <h1>🥊 COMPTE</h1>
   <div class="rows">
     <div id="nameField" style="display:none"><input id="a-name" placeholder="Pseudo" maxlength="20" autocomplete="nickname"></div>
+ <div id="invField" style="display:none"><input id="a-inv" placeholder="Code d'invitation" autocapitalize="none" autocomplete="off"></div>
     <div><input id="a-email" type="email" placeholder="Email" autocomplete="email" autocapitalize="none"></div>
     <div><input id="a-pw" type="password" placeholder="Mot de passe (6 caractères min.)" autocomplete="current-password"></div>
     <div class="err" id="a-err"></div>
@@ -192,21 +193,32 @@ const CH='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const gen=()=>Array.from({length:6},()=>CH[Math.floor(Math.random()*CH.length)]).join('');
 const pid=(a,b)=>a<b?a+'_'+b:b+'_'+a;
 const sid=t=>t.replace(/[^0-9A-Za-z]/g,'');
-async function ensure(u,name){
+async function ensure(u,name,inv){
   const ref=F.doc(db,'profiles',u.uid), sn=await F.getDoc(ref);
   if(sn.exists()) return sn.data();
-  let code;
-  for(let i=0;i<8;i++){ code=gen(); const q=await F.getDocs(F.query(F.collection(db,'profiles'),F.where('code','==',code))); if(q.empty) break; }
-  const p={name:(name||u.email.split('@')[0]).slice(0,20),code,uid:u.uid};
-  await F.setDoc(ref,p); return p;
+  const p={name:(name||u.email.split('@')[0]).slice(0,20),code:gen(),uid:u.uid,inv:inv||''};
+  await F.setDoc(ref,p);
+  const q=await F.getDocs(F.query(F.collection(db,'profiles'),F.where('code','==',p.code)));
+  if(q.size>1){ p.code=gen(); await F.setDoc(ref,p); }
+  return p;
 }
+let signingUp=false;
 A.onAuthStateChanged(auth,async u=>{
   c.user=u; c.profile=null; c.friends=null;
-  if(u){ try{ c.profile=await ensure(u,pending); }catch(e){ console.error(e); } pending=null; }
+  if(signingUp) return;
+  if(u){ try{ c.profile=await ensure(u,null,null); }catch(e){ console.error(e); if(e&&e.code==='permission-denied'){ await A.signOut(auth); return; } } }
   emit();
 });
 c.signIn=(e,p)=>A.signInWithEmailAndPassword(auth,e,p);
-c.signUp=async(n,e,p)=>{ pending=n; try{ await A.createUserWithEmailAndPassword(auth,e,p); }catch(x){ pending=null; throw x; } };
+c.signUp=async(n,e,p,inv)=>{
+  signingUp=true;
+  try{
+    const cr=await A.createUserWithEmailAndPassword(auth,e,p);
+    try{ c.user=cr.user; c.profile=await ensure(cr.user,n,inv); }
+    catch(x){ try{ await A.deleteUser(cr.user); }catch(y){} throw {code:x&&x.code==='permission-denied'?'app/bad-invite':(x&&x.code)}; }
+  } finally { signingUp=false; }
+  emit();
+};
 c.signOut=()=>A.signOut(auth);
 c.saveSession=s=>F.setDoc(F.doc(db,'users',c.user.uid,'sessions',sid(s.t)),{t:s.t,rounds:s.rounds,planned:s.planned,fightSec:s.fightSec});
 c.getSessions=async uid=>(await F.getDocs(F.query(F.collection(db,'users',uid,'sessions'),F.orderBy('t','desc'),F.limit(200)))).docs.map(d=>d.data());
@@ -360,7 +372,7 @@ function saveSession(){
   return true;
 }
 const esc=x=>String(x).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const ERR={'auth/invalid-credential':'Email ou mot de passe incorrect','auth/invalid-email':'Email invalide','auth/email-already-in-use':'Cet email a déjà un compte','auth/weak-password':'Mot de passe trop court (6 caractères min.)','auth/network-request-failed':'Pas de connexion internet','auth/too-many-requests':"Trop d'essais, réessaie plus tard",'app/not-found':'Code introuvable','app/self':"C'est ton propre code",'app/already':'Vous êtes déjà amis','app/pending':'Demande déjà envoyée','app/incoming':"Cette personne t'a déjà envoyé une demande : accepte-la",'permission-denied':'Action refusée','app/timeout':'Connexion trop lente, réessaie dans un instant'};
+const ERR={'auth/invalid-credential':'Email ou mot de passe incorrect','auth/invalid-email':'Email invalide','auth/email-already-in-use':'Cet email a déjà un compte','auth/weak-password':'Mot de passe trop court (6 caractères min.)','auth/network-request-failed':'Pas de connexion internet','auth/too-many-requests':"Trop d'essais, réessaie plus tard",'app/not-found':'Code introuvable','app/self':"C'est ton propre code",'app/already':'Vous êtes déjà amis','app/pending':'Demande déjà envoyée','app/incoming':"Cette personne t'a déjà envoyé une demande : accepte-la",'permission-denied':'Action refusée','app/bad-invite':"Code d'invitation incorrect",'app/timeout':'Connexion trop lente, réessaie dans un instant'};
 const errMsg=e=>ERR[e&&e.code]||'Erreur : '+((e&&e.code)||e);
 const cl=()=>window.cloud, logged=()=>cl()&&cl().user;
 let histUid=null;
@@ -399,7 +411,7 @@ async function renderHist(){
 
 /* ---------- Compte & amis ---------- */
 let authMode='in';
-function setAuthMode(m){ authMode=m; $('nameField').style.display=m==='up'?'':'none'; $('a-go').textContent=m==='up'?'Créer mon compte':'Se connecter'; $('a-switch').textContent=m==='up'?"J'ai déjà un compte":'Créer un compte'; $('a-err').textContent=''; }
+function setAuthMode(m){ authMode=m; $('nameField').style.display=m==='up'?'':'none'; $('invField').style.display=m==='up'?'':'none'; $('a-go').textContent=m==='up'?'Créer mon compte':'Se connecter'; $('a-switch').textContent=m==='up'?"J'ai déjà un compte":'Créer un compte'; $('a-err').textContent=''; }
 function badge(f){ $('friendsBtn').textContent='Amis'+(f&&f.incoming.length?' ('+f.incoming.length+')':''); }
 async function renderFriends(){
   const c=cl(), b=$('fbody');
@@ -422,10 +434,11 @@ $('friendsBtn').addEventListener('click',openFriends);
 $('a-back').addEventListener('click',()=>show('setup'));
 $('a-switch').addEventListener('click',()=>setAuthMode(authMode==='in'?'up':'in'));
 $('a-go').addEventListener('click',async()=>{
-  const e=$('a-email').value.trim(), p=$('a-pw').value, n=$('a-name').value.trim(), err=$('a-err');
+  const e=$('a-email').value.trim(), p=$('a-pw').value, n=$('a-name').value.trim(), inv=$('a-inv').value.trim(), err=$('a-err');
   if(authMode==='up'&&!n){ err.textContent='Choisis un pseudo'; return; }
+  if(authMode==='up'&&!inv){ err.textContent="Saisis ton code d'invitation"; return; }
   err.textContent='…';
-  try{ authMode==='up'?await cl().signUp(n,e,p):await cl().signIn(e,p); $('a-pw').value=''; err.textContent=''; }
+  try{ authMode==='up'?await cl().signUp(n,e,p,inv):await cl().signIn(e,p); $('a-pw').value=''; err.textContent=''; }
   catch(x){ err.textContent=errMsg(x); }
 });
 $('fback').addEventListener('click',()=>show('setup'));
